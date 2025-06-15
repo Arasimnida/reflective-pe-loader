@@ -11,6 +11,7 @@ use windows::{
             MEM_RESERVE,
             PAGE_EXECUTE_READ, 
             PAGE_READWRITE,
+            PAGE_READONLY,
         },
         LibraryLoader::{
             GetModuleHandleA, 
@@ -61,6 +62,31 @@ fn rva_to_offset(pe: &PE, rva: usize) -> Option<usize> {
     };
     None
 }
+
+fn protect_section(base: *mut u8,
+                   rva: usize,
+                   size: usize,
+                   characteristics: u32)
+{
+    let protect = if characteristics & 0x20000000 != 0 {        // EXECUTE
+        PAGE_EXECUTE_READ
+    } else if characteristics & 0x80000000 != 0 {               // WRITE
+        PAGE_READWRITE
+    } else {
+        PAGE_READONLY
+    };
+    let mut old = PAGE_READWRITE;
+    unsafe {
+        let ok = VirtualProtect(
+            base.add(rva) as *mut _,
+            size,
+            protect,
+            &mut old,
+        );
+        assert!(ok.is_ok(), "VirtualProtect section failed");
+    }
+}
+
 
 fn main() {
     unsafe {
@@ -233,20 +259,27 @@ fn main() {
             }
         }
 
-        let mut old_protect = PAGE_READWRITE;
-        let ok = VirtualProtect(
-            exec_region as *mut _,
-            size_of_image,
-            PAGE_EXECUTE_READ,
-            &mut old_protect
-        );
-        assert!(ok.is_ok(), "Virtual Protect failed");
+        println!("Setting per-section protections…");
+        for sect in &pe.sections {
+            let characs = sect.characteristics;
+            let vsize   = sect.virtual_size as usize;
+            let vrva    = sect.virtual_address as usize;
+            protect_section(exec_region, vrva, vsize, characs);
+        }
+        println!("All sections protected.");
 
-        println!("Memory region {:p}–{:p} now RX (old = 0x{:X})",
-            exec_region,
-            exec_region.add(size_of_image),
-            old_protect.0
-        );
+        type DllMain = unsafe extern "system" fn(
+            *mut core::ffi::c_void,
+            u32,
+            *mut core::ffi::c_void,
+        ) -> i32;
         
+        let entry_point_virtual_address = optional_header.standard_fields.address_of_entry_point as usize;
+        let entry_addr = exec_region.add(entry_point_virtual_address);
+
+        let dll_main: DllMain = core::mem::transmute(entry_addr);
+        let ret = dll_main(exec_region as _, 1, core::ptr::null_mut());
+
+        assert!(ret != 0, "DllMain returned FALSE / loader aborts.");
     }
 }
