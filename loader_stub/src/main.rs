@@ -135,7 +135,7 @@ fn main() {
             let entries_ptr = PAYLOAD[(offset + 8)..].as_ptr() as *const u16;
 
             for i in 0..entries {
-                let entry_raw = *entries_ptr.add(i);
+                let entry_raw = std::ptr::read_unaligned(entries_ptr.add(i));
                 let entry_type = entry_raw >> 12;
                 let entry_offset = (entry_raw & 0x0FFF) as usize;
 
@@ -179,9 +179,9 @@ fn main() {
             let mut thunk_off = rva_to_offset(&pe, import_lookup_table_rva).expect("Invalid RVA for ILT/IAT");
             let mut iat_ptr = exec_region.add(import_directory_entry.import_address_table_rva as usize) as *mut u64;
             
-            const ENTRY_SIZE: usize = std::mem::size_of::<u64>();
+            const ENTRY_SIZE: usize = 8;
             loop {
-                let thunk_data = *(PAYLOAD.as_ptr().add(thunk_off) as *const usize);
+                let thunk_data = std::ptr::read_unaligned(PAYLOAD.as_ptr().add(thunk_off) as *const u64);
                 if thunk_data == 0 {
                     break;
                 }
