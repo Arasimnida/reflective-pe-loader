@@ -24,6 +24,23 @@ use std::{ffi::CStr, usize};
 
 static PAYLOAD: &'static [u8] = include_bytes!("payload_messagebox.dll");
 
+#[repr(C)]
+#[derive(Copy, Clone)]
+struct ImageTlsDirectory64 {
+    start_address_of_raw_data: u64,
+    end_address_of_raw_data:   u64,
+    address_of_index:          u64,
+    address_of_callbacks:      u64,
+    size_of_zero_fill:         u32,
+    characteristics:           u32,
+}
+
+type TlsCallback = unsafe extern "system" fn(
+    *mut core::ffi::c_void,
+    u32,
+    *mut core::ffi::c_void,
+);
+
 #[allow(unsafe_op_in_unsafe_fn)]
 unsafe fn alloc_exec_region(size: usize) -> *mut u8 {
     let alloc_address = VirtualAlloc(
@@ -181,14 +198,32 @@ fn main() {
                     func_addr as u64
                 };
 
-                iat_ptr.write(function_address);
+                std::ptr::write_unaligned(iat_ptr, function_address);
 
                 thunk_off += ENTRY_SIZE;
-                iat_ptr = iat_ptr.add(1);
+                iat_ptr = (iat_ptr as *mut u8).add(ENTRY_SIZE) as *mut u64;
             }
 
             import_offset += import_directory_size;
 
         }
+
+        if let Some(tls_table) = optional_header.data_directories.get_tls_table() {
+            let tls_table_virtual_address = tls_table.virtual_address as usize;
+            if tls_table_virtual_address != 0 {
+                let tls_table_offset = rva_to_offset(&pe, tls_table_virtual_address).expect("Invalid RVA for TLS Table");
+                let tls = std::ptr::read_unaligned(PAYLOAD.as_ptr().add(tls_table_offset) as *const ImageTlsDirectory64);
+                let mut callback_address = tls.address_of_callbacks as usize;
+                while callback_address != 0 {
+                    let callback_ptr = exec_region.add(callback_address - preferred_base);
+                    let callback: TlsCallback = core::mem::transmute(callback_ptr);
+
+                    callback(exec_region as _, 1, core::ptr::null_mut());
+                    callback_address = *(exec_region.add(callback_address - preferred_base + 8) as *const u64) as usize;
+                }
+            }
+            
+        }
+        
     }
 }
