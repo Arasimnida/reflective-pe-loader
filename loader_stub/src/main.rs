@@ -35,12 +35,6 @@ struct ImageTlsDirectory64 {
     characteristics:           u32,
 }
 
-type TlsCallback = unsafe extern "system" fn(
-    *mut core::ffi::c_void,
-    u32,
-    *mut core::ffi::c_void,
-);
-
 #[allow(unsafe_op_in_unsafe_fn)]
 unsafe fn alloc_exec_region(size: usize) -> *mut u8 {
     let alloc_address = VirtualAlloc(
@@ -117,37 +111,36 @@ fn main() {
 
         let preferred_base = optional_header.windows_fields.image_base as usize;
         let delta = (exec_region as usize) - preferred_base;
+        if let Some(base_relocation_table) = optional_header.data_directories.get_base_relocation_table() {
+            let reloc_virtual_address = base_relocation_table.virtual_address as usize;
+            let reloc_size = base_relocation_table.size as usize;
+            if (reloc_size == 0) ||(reloc_virtual_address == 0) {
+                println!("No relocation present.")
+            };
+            let mut offset = rva_to_offset(&pe, reloc_virtual_address).expect("RVA to offset failed");
+            let end = offset + reloc_size;
+            const IMAGE_REL_BASED_DIR64: u16 = 10;
+            while offset < end {
+                let page_rva = u32::from_le_bytes(PAYLOAD[offset..(offset + 4)].try_into().unwrap()) as usize;
+                let block_size = u32::from_le_bytes(PAYLOAD[(offset + 4)..(offset + 8)].try_into().unwrap()) as usize;
+                let entries = (block_size - 8) / 2;
+                let entries_ptr = PAYLOAD[(offset + 8)..].as_ptr() as *const u16;
 
-        let base_relocation_table = optional_header.data_directories.get_base_relocation_table().expect("Failed to get base relocation table");
-        let reloc_virtual_address = base_relocation_table.virtual_address as usize;
-        let reloc_size = base_relocation_table.size as usize;
-        if (reloc_size == 0) ||(reloc_virtual_address == 0) {
-            println!("No relocation present.")
-        };
-        let mut offset = rva_to_offset(&pe, reloc_virtual_address).expect("RVA to offset failed");
-        let end = offset + reloc_size;
+                for i in 0..entries {
+                    let entry_raw = std::ptr::read_unaligned(entries_ptr.add(i));
+                    let entry_type = entry_raw >> 12;
+                    let entry_offset = (entry_raw & 0x0FFF) as usize;
 
-        const IMAGE_REL_BASED_DIR64: u16 = 10;
-        while offset < end {
-            let page_rva = u32::from_le_bytes(PAYLOAD[offset..(offset + 4)].try_into().unwrap()) as usize;
-            let block_size = u32::from_le_bytes(PAYLOAD[(offset + 4)..(offset + 8)].try_into().unwrap()) as usize;
-            let entries = (block_size - 8) / 2;
-            let entries_ptr = PAYLOAD[(offset + 8)..].as_ptr() as *const u16;
-
-            for i in 0..entries {
-                let entry_raw = std::ptr::read_unaligned(entries_ptr.add(i));
-                let entry_type = entry_raw >> 12;
-                let entry_offset = (entry_raw & 0x0FFF) as usize;
-
-                if entry_type == IMAGE_REL_BASED_DIR64 {
-                    let patch_ptr = exec_region.add(page_rva + entry_offset) as *mut u64;
-                    let original_ptr = patch_ptr.read_unaligned();
-                    let correction = original_ptr + delta as u64;
-                    patch_ptr.write_unaligned(correction);
+                    if entry_type == IMAGE_REL_BASED_DIR64 {
+                        let patch_ptr = exec_region.add(page_rva + entry_offset) as *mut u64;
+                        let original_ptr = patch_ptr.read_unaligned();
+                        let correction = original_ptr + delta as u64;
+                        patch_ptr.write_unaligned(correction);
+                    }
                 }
-            }
 
-            offset += block_size;
+                offset += block_size;
+            }
         }
 
         let import_table = optional_header.data_directories.get_import_table().expect("Failed to get Import Table");
@@ -207,23 +200,53 @@ fn main() {
             import_offset += import_directory_size;
 
         }
-
+        println!("pretls");
         if let Some(tls_table) = optional_header.data_directories.get_tls_table() {
             let tls_table_virtual_address = tls_table.virtual_address as usize;
             if tls_table_virtual_address != 0 {
                 let tls_table_offset = rva_to_offset(&pe, tls_table_virtual_address).expect("Invalid RVA for TLS Table");
-                let tls = std::ptr::read_unaligned(PAYLOAD.as_ptr().add(tls_table_offset) as *const ImageTlsDirectory64);
-                let mut callback_address = tls.address_of_callbacks as usize;
-                while callback_address != 0 {
-                    let callback_ptr = exec_region.add(callback_address - preferred_base);
-                    let callback: TlsCallback = core::mem::transmute(callback_ptr);
 
-                    callback(exec_region as _, 1, core::ptr::null_mut());
-                    callback_address = *(exec_region.add(callback_address - preferred_base + 8) as *const u64) as usize;
+                let tls = std::ptr::read_unaligned(PAYLOAD.as_ptr().add(tls_table_offset) as *const ImageTlsDirectory64);
+                let mut table_address = tls.address_of_callbacks as usize;
+                println!("{}", table_address);
+
+                if table_address != 0 {
+                        type TlsCallback = unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        u32,
+                        *mut core::ffi::c_void,
+                    );
+
+                    while (table_address > preferred_base) && (table_address - preferred_base < size_of_image) {
+                        let callback_virtual_address = std::ptr::read_unaligned(exec_region.add(table_address - preferred_base) as *const u64) as usize;
+                        if callback_virtual_address == 0 { break; }
+
+                        let callback_ptr = exec_region.add(callback_virtual_address - preferred_base);
+                        let callback: TlsCallback = core::mem::transmute(callback_ptr);
+
+                        if (callback_virtual_address < preferred_base) || (callback_virtual_address - preferred_base >= size_of_image) { break; }
+
+                        callback(exec_region as _, 1, core::ptr::null_mut());
+                        table_address += 8;
+                    }
                 }
             }
-            
         }
+
+        let mut old_protect = PAGE_READWRITE;
+        let ok = VirtualProtect(
+            exec_region as *mut _,
+            size_of_image,
+            PAGE_EXECUTE_READ,
+            &mut old_protect
+        );
+        assert!(ok.is_ok(), "Virtual Protect failed");
+
+        println!("Memory region {:p}–{:p} now RX (old = 0x{:X})",
+            exec_region,
+            exec_region.add(size_of_image),
+            old_protect.0
+        );
         
     }
 }
