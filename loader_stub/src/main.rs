@@ -37,4 +37,40 @@ fn main() {
         std::ptr::copy_nonoverlapping(PAYLOAD.as_ptr(), exec_region, size_of_headers);
     }
     println!("Copied {} bytes of headers", size_of_headers);
+
+    for section in &pe.sections {
+        let virtual_address = unsafe { exec_region.add(section.virtual_address as usize)};
+        let raw_size = section.size_of_raw_data as usize;
+        let raw_offset = section.pointer_to_raw_data as usize;
+
+        if raw_size > 0 {
+            unsafe {
+                std::ptr::copy_nonoverlapping(PAYLOAD.as_ptr().add(raw_offset), virtual_address, raw_size);
+            }
+        }
+        println!(
+            "  Copied section {:8} @ {:p} ({} bytes)",
+            section.name().unwrap_or("<?>"),
+            virtual_address,
+            raw_size
+        );
+
+        let virtual_size = section.virtual_size as usize;
+        if virtual_size > raw_size {
+            let bss_ptr = unsafe {
+                virtual_address.add(raw_size)
+            };
+            let bss_size = virtual_size - raw_size;
+            unsafe {
+                std::ptr::write_bytes(bss_ptr, 0, bss_size);
+            }
+            println!(
+                "  Zeroed BSS in {:8} @ {:p} ({} bytes)",
+                section.name().unwrap_or("<?>"),
+                bss_ptr,
+                bss_size
+            );
+        }
+    }
+
 }
