@@ -115,7 +115,7 @@ fn main() {
 
             if entry_type == IMAGE_REL_BASED_DIR64 {
                 unsafe {
-                    let patch_ptr = exec_region.add(reloc_virtual_address + entry_offset) as *mut u64;
+                    let patch_ptr = exec_region.add(page_rva + entry_offset) as *mut u64;
                     let original_ptr = patch_ptr.read_unaligned();
                     let correction = original_ptr + delta as u64;
                     patch_ptr.write_unaligned(correction);
