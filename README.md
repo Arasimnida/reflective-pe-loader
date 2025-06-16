@@ -1,10 +1,10 @@
 # Reflective PE Loader
 
 > **⚠️ WARNING**  
->    This is a project for demonstration, research and learning purposes only. 
+>    This is a project for demonstration, research, pentesting/red-teaming and learning purposes only. 
 >    Don't use it for anything illegal, please respect the law.
 
-Rust‑based implementation of a fully manual PE loader for 64‑bit Windows.  The loader maps a DLL from memory, applies relocations, resolves imports, honours TLS callbacks, sets per‑section page protections, and finally transfers control to `DllMain` without ever invoking `LoadLibrary`.
+This project is a focused, Rust‑driven study of **manual PE loading on 64‑bit Windows**.  The loader operates entirely from an in‑memory byte slice—no file on disk, no call to LoadLibrary. It replicates every step the native loader performs: section mapping, relocations, import resolution, TLS initialisation and finally a transfer of control to DllMain. Making it a compact building‑block for more advanced trade‑craft.
 
 ---
 
