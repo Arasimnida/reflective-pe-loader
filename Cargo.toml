@@ -1,2 +1,2 @@
 [workspace]
-members = [ "builder","loader_stub"]
+members = [ "builder", "injector","loader_stub"]
