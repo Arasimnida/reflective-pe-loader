@@ -102,8 +102,18 @@ fn rva_to_offset(pe: &PE, rva: usize) -> Option<usize> {
 }
 
 #[allow(unsafe_op_in_unsafe_fn)]
-unsafe fn unicode_to_string(unicode: &UnicodeString) -> String {
-    let len = (unicode.length / 2) as usize; // UTF-16 = 2 bytes
+pub unsafe fn unicode_to_string(unicode: &UnicodeString) -> String {
+    let len = (unicode.length / 2) as usize;
+
+    println!("    [dbg] unicode.length = {}", unicode.length);
+    println!("    [dbg] unicode.buffer = {:p}", unicode.buffer);
+    println!("    [dbg] slice size = {}", len);
+
+    if unicode.buffer.is_null() || len == 0 || len > 512 {
+        println!("    [err] Invalid unicode string parameters, skipping...");
+        return String::new();
+    }
+
     let slice = core::slice::from_raw_parts(unicode.buffer, len);
     String::from_utf16_lossy(slice)
 }
@@ -152,8 +162,110 @@ pub unsafe fn get_peb() -> *mut u8 {
     peb
 }
 
+#[allow(unsafe_op_in_unsafe_fn)]
+pub unsafe fn get_kernel32_base() -> *mut u8 {
+    println!("\n========== [ get_kernel32_base() ] ==========");
+
+    let peb_ptr = get_peb();
+    println!("[*] PEB pointer               = {:p}", peb_ptr);
+
+    let ldr_ptr_ptr = peb_ptr.add(0x18) as *const *const PebLdrData;
+    let ldr_ptr = *ldr_ptr_ptr;
+    println!("[*] Ldr pointer               = {:p}", ldr_ptr);
+
+    let list_head = (ldr_ptr as *const u8).add(0x10) as *const ListEntry;
+    println!("[*] List head                 = {:p}", list_head);
+
+    let mut current = (*list_head).flink as *const ListEntry;
+    let list_head_ptr = list_head as *const ListEntry;
+    let mut i = 0;
+
+    loop {
+        if current.is_null() || current == list_head_ptr {
+            break;
+        }
+        println!("\n[*] Iteration {}", i);
+        println!("    current_entry            = {:p}", current);
+
+        let entry = current as *const LdrDataTableEntry;
+        println!("    entry struct             = {:p}", entry);
+
+        let name_unicode = &(*entry).base_dll_name;
+        let name = unicode_to_string(name_unicode);
+        let hash = hash_name(&name.to_ascii_lowercase());
+
+        println!("    [dbg] unicode.length     = {}", name_unicode.length);
+        println!("    [dbg] unicode.buffer     = {:p}", name_unicode.buffer);
+
+        let len = (name_unicode.length / 2) as usize;
+        for i in 0..len {
+            let ch = *name_unicode.buffer.add(i);
+            print!("{:04x} ", ch);
+        }
+        println!();
+
+        println!("    DLL Name = {:<30} | Hash = 0x{:08x}", name, hash);
+
+        if hash == HASH_KERNEL32_DLL {
+            println!("\n[+] Found kernel32.dll at {:p}", (*entry).dll_base);
+            return (*entry).dll_base;
+        }
+
+        current = (*current).flink as *const ListEntry;
+        i += 1;
+
+        if i > 100 {
+            println!("[!] Exceeded 100 iterations — bail out.");
+            break;
+        }
+    }
+
+    println!("[!] kernel32.dll not found.");
+    core::ptr::null_mut()
+}
+
+#[allow(unsafe_op_in_unsafe_fn)]
+pub unsafe fn check_peb_integrity() {
+    println!("\n========== [ PEB Sanity Check ] ==========");
+
+    let peb_ptr = get_peb();
+    println!("[*] PEB pointer               = {:p}", peb_ptr);
+
+    // 1. ImageBaseAddress — offset 0x10
+    let image_base_ptr = *(peb_ptr.add(0x10) as *const *const u8);
+    println!("[*] ImageBaseAddress          = {:p}", image_base_ptr);
+
+    // 2. Ldr pointer — offset 0x18
+    let ldr_ptr = *(peb_ptr.add(0x18) as *const *const u8);
+    println!("[*] Ldr pointer               = {:p}", ldr_ptr);
+
+    // 3. PEB first 0x30 bytes
+    println!("\n[+] Raw PEB memory dump (0x30 bytes):");
+    for i in 0..0x30 {
+        let byte = *peb_ptr.add(i);
+        print!("{:02x} ", byte);
+        if i % 8 == 7 { println!(); }
+    }
+
+    // 4. LDR first 0x30 bytes
+    println!("\n[+] Raw Ldr memory dump (0x30 bytes):");
+    for i in 0..0x30 {
+        let byte = *ldr_ptr.add(i);
+        print!("{:02x} ", byte);
+        if i % 8 == 7 { println!(); }
+    }
+
+    // 5. Local image base from code ptr
+    let local_code_ptr = check_peb_integrity as *const ();
+    println!("\n[*] Current module address    = {:p}", local_code_ptr);
+    println!("=========================================\n");
+}
+
 fn main() {
     unsafe {
+        check_peb_integrity();
+        let k32 = get_kernel32_base();
+        println!("kernel32 base = {:?}", k32);
         let pe = PE::parse(PAYLOAD).expect("Failed to parse DLL");
         let optional_header = pe.header.optional_header.expect("Failed to get OptionalHeader");
         //let standard_fields = optional_header.standard_fields;
