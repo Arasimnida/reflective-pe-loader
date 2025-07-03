@@ -22,6 +22,7 @@ use windows::{
 };
 use scroll::{ctx::TryFromCtx, Endian};
 use std::{ffi::CStr, usize};
+use sha2::{Sha256, Digest};
 
 static PAYLOAD: &'static [u8] = include_bytes!("payload_messagebox.dll");
 
@@ -77,6 +78,26 @@ fn rva_to_offset(pe: &PE, rva: usize) -> Option<usize> {
     };
     None
 }
+
+#[allow(unsafe_op_in_unsafe_fn)]
+unsafe fn unicode_to_string(unicode: &UnicodeString) -> String {
+    let len = (unicode.length / 2) as usize; // UTF-16 = 2 bytes
+    let slice = core::slice::from_raw_parts(unicode.buffer, len);
+    String::from_utf16_lossy(slice)
+}
+
+fn hash_name(name: &str) -> u32 {
+    let mut data = name.as_bytes().to_vec();
+
+    for _ in 0..7 {
+        let mut hasher = Sha256::new();
+        hasher.update(&data);
+        data = hasher.finalize().to_vec();
+    }
+
+    u32::from_le_bytes([data[0], data[1], data[2], data[3]])
+}
+
 
 fn protect_section(base: *mut u8,
                    rva: usize,
