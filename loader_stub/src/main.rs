@@ -26,6 +26,21 @@ use std::{ffi::CStr, usize};
 static PAYLOAD: &'static [u8] = include_bytes!("payload_messagebox.dll");
 
 #[repr(C)]
+pub struct UnicodeString {
+    pub length: u16,
+    pub maximum_length: u16,
+    pub buffer: *const u16,
+}
+
+#[repr(C)]
+pub struct LdrDataTableEntry {
+    pub reserved1: [u8; 0x30],
+    pub dll_base: *mut u8,
+    pub reserved2: [u8; 0x18],
+    pub base_dll_name: UnicodeString,
+}
+
+#[repr(C)]
 #[derive(Copy, Clone)]
 struct ImageTlsDirectory64 {
     start_address_of_raw_data: u64,
