@@ -26,6 +26,10 @@ use sha2::{Sha256, Digest};
 
 static PAYLOAD: &'static [u8] = include_bytes!("payload_messagebox.dll");
 
+const HASH_KERNEL32_DLL: u32 = 0x4afb7610;
+const HASH_GETPROCADDRESS: u32 = 0xb7c8436f;
+const HASH_GETMODULEHANDLEA: u32 = 0x0f92ed7a;
+
 #[repr(C)]
 pub struct UnicodeString {
     pub length: u16,
