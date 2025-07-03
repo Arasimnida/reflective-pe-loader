@@ -87,6 +87,12 @@ fn protect_section(base: *mut u8,
     }
 }
 
+#[allow(unsafe_op_in_unsafe_fn)]
+pub unsafe fn get_peb() -> *mut u8 {
+    let peb: *mut u8;
+    core::arch::asm!("mov {}, gs:[0x60]", out(reg) peb);
+    peb
+}
 
 fn main() {
     unsafe {
