@@ -39,9 +39,13 @@ pub struct UnicodeString {
 
 #[repr(C)]
 pub struct LdrDataTableEntry {
-    pub reserved1: [u8; 0x30],
+    pub in_load_order_links: ListEntry,
+    pub in_memory_order_links: ListEntry,
+    pub in_initialization_order_links: ListEntry,
     pub dll_base: *mut u8,
-    pub reserved2: [u8; 0x18],
+    pub entry_point: *mut u8,
+    pub size_of_image: u32,
+    pub full_dll_name: UnicodeString,
     pub base_dll_name: UnicodeString,
 }
 
@@ -54,6 +58,20 @@ struct ImageTlsDirectory64 {
     address_of_callbacks:      u64,
     size_of_zero_fill:         u32,
     characteristics:           u32,
+}
+
+#[repr(C)]
+pub struct ListEntry {
+    pub flink: *mut ListEntry,
+    pub blink: *mut ListEntry,
+}
+
+#[repr(C)]
+pub struct PebLdrData {
+    pub reserved1: [u8; 8],
+    pub in_load_order_module_list: ListEntry,
+    pub in_memory_order_module_list: ListEntry,
+    pub in_initialization_order_module_list: ListEntry,
 }
 
 #[allow(unsafe_op_in_unsafe_fn)]
