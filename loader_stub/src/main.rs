@@ -126,6 +126,7 @@ struct ImageSectionHeader {
 struct ParsedPe<'a> {
     nt_headers: &'a ImageNtHeaders64,
     sections: &'a [ImageSectionHeader],
+    num_sections: usize,
 }
 
 #[repr(C)]
@@ -142,6 +143,34 @@ struct ImageExportDirectory {
     address_of_functions: u32,
     address_of_names: u32,
     address_of_name_ordinals: u32,
+}
+
+#[derive(Debug)]
+struct PeOptionalFields {
+    image_base: u64,
+    size_of_image: u32,
+    size_of_headers: u32,
+    address_of_entry_point: u32,
+}
+
+fn get_optional_header_fields(pe: &ParsedPe) -> PeOptionalFields {
+    let opt = &pe.nt_headers.optional_header;
+
+    unsafe {
+        let base = opt as *const _ as *const u8;
+
+        let address_of_entry_point = core::ptr::read_unaligned(base.add(0x10) as *const u32);
+        let image_base             = core::ptr::read_unaligned(base.add(0x18) as *const u64);
+        let size_of_image          = core::ptr::read_unaligned(base.add(0x38) as *const u32);
+        let size_of_headers        = core::ptr::read_unaligned(base.add(0x3C) as *const u32);
+
+        PeOptionalFields {
+            image_base,
+            size_of_image,
+            size_of_headers,
+            address_of_entry_point,
+        }
+    }
 }
 
 #[allow(unsafe_op_in_unsafe_fn)]
@@ -174,6 +203,7 @@ unsafe fn parse_pe(payload: &[u8]) -> ParsedPe<'_> {
     ParsedPe {
         nt_headers,
         sections: Box::leak(sections.into_boxed_slice()), // make Vec 'static
+        num_sections,
     }
 }
 
