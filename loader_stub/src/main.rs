@@ -128,6 +128,22 @@ struct ParsedPe<'a> {
     sections: &'a [ImageSectionHeader],
 }
 
+#[repr(C)]
+#[derive(Debug)]
+struct ImageExportDirectory {
+    characteristics: u32,
+    time_date_stamp: u32,
+    major_version: u16,
+    minor_version: u16,
+    name: u32,
+    base: u32,
+    number_of_functions: u32,
+    number_of_names: u32,
+    address_of_functions: u32,
+    address_of_names: u32,
+    address_of_name_ordinals: u32,
+}
+
 #[allow(unsafe_op_in_unsafe_fn)]
 unsafe fn parse_pe(payload: &[u8]) -> ParsedPe<'_> {
     let dos = &*(payload.as_ptr() as *const ImageDosHeader);
@@ -194,6 +210,43 @@ fn rva_to_offset(pe: &PE, rva: usize) -> Option<usize> {
         }
     };
     None
+}
+
+fn rva_to_offset_home(pe: &ParsedPe, rva: usize) -> Option<usize> {
+    for section in pe.sections {
+        let virtual_address = section.virtual_address as usize;
+        let virtual_size = section.virtual_size as usize;
+        let range = virtual_address..(virtual_address + virtual_size);
+        if range.contains(&rva) {
+            let delta = rva - virtual_address;
+            let file_offset = section.pointer_to_raw_data as usize + delta;
+            return Some(file_offset);
+        }
+    }
+    None
+}
+
+
+#[allow(unsafe_op_in_unsafe_fn)]
+unsafe fn get_export_directory<'a>(pe: &ParsedPe<'a>, payload: &'a [u8]) -> Option<(&'a ImageExportDirectory, usize)> {
+    let export_data = pe.nt_headers.optional_header.data_directory[0];
+
+    if export_data.virtual_address == 0 {
+        println!("[dbg] Export virtual address is null");
+        return None;
+    }
+    if export_data.size == 0 {
+        println!("[warn] Export size is 0, but RVA is valid — trying anyway");
+    }
+
+    let offset = rva_to_offset_home(pe, export_data.virtual_address as usize)?;
+    if offset + std::mem::size_of::<ImageExportDirectory>() > payload.len() {
+        println!("[dbg] offset+size = pb");
+        return None;
+    }
+
+    let dir_ptr = payload.as_ptr().add(offset) as *const ImageExportDirectory;
+    Some((&*dir_ptr, offset))
 }
 
 #[allow(unsafe_op_in_unsafe_fn)]
