@@ -118,7 +118,7 @@ struct ImageSectionHeader {
     virtual_address: u32,
     size_of_raw_data: u32,
     pointer_to_raw_data: u32,
-    _pad: [u8; 16],
+    _pad: [u8; 12],
     characteristics: u32,
 }
 
