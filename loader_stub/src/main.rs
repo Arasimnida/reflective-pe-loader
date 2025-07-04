@@ -96,9 +96,37 @@ struct ImageDataDirectory {
 }
 
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 struct ImageOptionalHeader64 {
-    _pad: [u8; 96], // jusqu’à data_directory
+    magic: u16,
+    major_linker_version: u8,
+    minor_linker_version: u8,
+    size_of_code: u32,
+    size_of_initialized_data: u32,
+    size_of_uninitialized_data: u32,
+    address_of_entry_point: u32,
+    base_of_code: u32,
+    image_base: u64,
+    section_alignment: u32,
+    file_alignment: u32,
+    major_operating_system_version: u16,
+    minor_operating_system_version: u16,
+    major_image_version: u16,
+    minor_image_version: u16,
+    major_subsystem_version: u16,
+    minor_subsystem_version: u16,
+    win32_version_value: u32,
+    size_of_image: u32,
+    size_of_headers: u32,
+    checksum: u32,
+    subsystem: u16,
+    dll_characteristics: u16,
+    size_of_stack_reserve: u64,
+    size_of_stack_commit: u64,
+    size_of_heap_reserve: u64,
+    size_of_heap_commit: u64,
+    loader_flags: u32,
+    number_of_rva_and_sizes: u32,
     data_directory: [ImageDataDirectory; 16],
 }
 
@@ -145,6 +173,23 @@ struct ImageExportDirectory {
     address_of_name_ordinals: u32,
 }
 
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ImageImportDescriptor {
+    original_first_thunk: u32,
+    time_date_stamp:      u32,
+    forwarder_chain:      u32,
+    name:                 u32,
+    first_thunk:          u32,
+}
+
+#[repr(C)]
+#[derive(Debug)]
+struct ImageImportByName {
+    hint: u16,
+    name: [u8; 1], // début d'une chaîne C-string
+}
+
 #[derive(Debug)]
 struct PeOptionalFields {
     image_base: u64,
@@ -174,35 +219,173 @@ fn get_optional_header_fields(pe: &ParsedPe) -> PeOptionalFields {
 }
 
 #[allow(unsafe_op_in_unsafe_fn)]
+unsafe fn get_import_descriptors<'a>(pe: &ParsedPe<'a>, payload: &'a [u8]) -> Vec<&'a ImageImportDescriptor> {
+    let dir = pe.nt_headers.optional_header.data_directory[1];
+    if dir.virtual_address == 0 {
+        println!("[!] No import directory.");
+        return vec![];
+    }
+
+    let mut offset = match rva_to_offset_home(pe, dir.virtual_address as usize) {
+        Some(o) => o,
+        None => {
+            println!("[!] Could not convert import RVA to file offset.");
+            return vec![];
+        }
+    };
+
+    let mut descriptors = Vec::new();
+    let descriptor_size = std::mem::size_of::<ImageImportDescriptor>();
+    let zero_desc = ImageImportDescriptor {
+        original_first_thunk: 0,
+        time_date_stamp:      0,
+        forwarder_chain:      0,
+        name:                 0,
+        first_thunk:          0,
+    };
+
+    loop {
+        if offset + descriptor_size > payload.len() {
+            println!("[!] Import table overflow.");
+            break;
+        }
+
+        let ptr = payload.as_ptr().add(offset) as *const ImageImportDescriptor;
+        let desc = core::ptr::read_unaligned(ptr);
+
+        if desc == zero_desc {
+            break;
+        }
+
+        descriptors.push(&*ptr);
+        offset += descriptor_size;
+    }
+
+    descriptors
+}
+
+
+#[allow(unsafe_op_in_unsafe_fn)]
+unsafe fn read_imported_functions<'a>(
+    pe: &ParsedPe<'a>,
+    payload: &'a [u8],
+    descriptor: &ImageImportDescriptor,
+) -> Vec<String> {
+    let mut functions = Vec::new();
+
+    let thunk_rva = if descriptor.original_first_thunk != 0 {
+        descriptor.original_first_thunk as usize
+    } else {
+        descriptor.first_thunk as usize
+    };
+
+    let mut offset = match rva_to_offset_home(pe, thunk_rva) {
+        Some(o) => o,
+        None => return functions,
+    };
+
+    loop {
+        if offset + 8 > payload.len() {
+            break;
+        }
+
+        let thunk_data = *(payload.as_ptr().add(offset) as *const u64);
+        if thunk_data == 0 {
+            break;
+        }
+
+        if (thunk_data >> 63) != 0 {
+            // Ordinal import
+            functions.push(format!("Ordinal({})", thunk_data & 0xFFFF));
+        } else {
+            // By name
+            let name_rva = (thunk_data & 0x7FFF_FFFF_FFFF_FFFF) as usize;
+            let name_offset = match rva_to_offset_home(pe, name_rva) {
+                Some(o) => o,
+                None => break,
+            };
+
+            let name_ptr = payload.as_ptr().add(name_offset + 2); // Skip 2-byte hint
+            let cstr = std::ffi::CStr::from_ptr(name_ptr as *const i8);
+            if let Ok(s) = cstr.to_str() {
+                functions.push(s.to_string());
+            }
+        }
+
+        offset += 8;
+    }
+
+    functions
+}
+
+#[allow(unsafe_op_in_unsafe_fn)]
+unsafe fn get_base_relocation_table<'a>(
+    pe: &ParsedPe<'a>
+) -> Option<(usize, usize)> {
+    let dir = pe.nt_headers.optional_header.data_directory[5];
+
+    if dir.virtual_address == 0 || dir.size == 0 {
+        return None;
+    }
+
+    Some((dir.virtual_address as usize, dir.size as usize))
+}
+
+
+#[allow(unsafe_op_in_unsafe_fn)]
 unsafe fn parse_pe(payload: &[u8]) -> ParsedPe<'_> {
-    let dos = &*(payload.as_ptr() as *const ImageDosHeader);
+    let dos_ptr = payload.as_ptr() as *const ImageDosHeader;
+    let dos = &*dos_ptr;
     assert_eq!(dos.e_magic, 0x5A4D, "Invalid DOS header (MZ)");
 
     let nt_offset = dos.e_lfanew as usize;
-    let nt_headers = &*(payload.as_ptr().add(nt_offset) as *const ImageNtHeaders64);
+    println!("[dbg] NT headers offset = 0x{:x}", nt_offset);
+
+    let nt_headers_ptr = payload.as_ptr().add(nt_offset) as *const ImageNtHeaders64;
+    let nt_headers = &*nt_headers_ptr;
     assert_eq!(nt_headers.signature, 0x00004550, "Invalid NT header (PE)");
 
-    let num_sections = std::ptr::read_unaligned(
-        payload.as_ptr().add(nt_offset + 6) as *const u16
-    ) as usize;
+    // Lire le nombre de sections (ImageFileHeader offset 6)
+    let ptr = payload.as_ptr().add(nt_offset + 6);
+    let num_sections = u16::from_le_bytes([*ptr, *ptr.add(1)]) as usize;
+    println!("[dbg] Number of sections = {}", num_sections);
 
-    let size_of_optional_header = std::ptr::read_unaligned(
-        payload.as_ptr().add(nt_offset + 4 + 16) as *const u16
-    ) as usize;
+    // Lire la taille de l'optional header à l'offset 20 (ImageFileHeader offset 16)
+    let size_of_optional_header = u16::from_le_bytes([
+        *payload.as_ptr().add(nt_offset + 20),
+        *payload.as_ptr().add(nt_offset + 21),
+    ]) as usize;
+    println!("[dbg] Size of optional header = 0x{:x}", size_of_optional_header);
 
     let section_start = nt_offset + 4 + std::mem::size_of::<ImageFileHeader>() + size_of_optional_header;
-    let mut sections = Vec::with_capacity(num_sections);
+    println!("[dbg] Section headers start = 0x{:x}", section_start);
 
+    let mut sections = Vec::with_capacity(num_sections);
     for i in 0..num_sections {
         let offset = section_start + i * std::mem::size_of::<ImageSectionHeader>();
+        if offset + std::mem::size_of::<ImageSectionHeader>() > payload.len() {
+            println!("[!] Offset 0x{:x} for section {} out of bounds!", offset, i);
+            break;
+        }
+
         let section_ptr = payload.as_ptr().add(offset) as *const ImageSectionHeader;
         let section = std::ptr::read_unaligned(section_ptr);
+
+        println!(
+            "[dbg] Parsed section {:02}: name = {:?}, RVA = 0x{:x}, RAW = 0x{:x}, SIZE = 0x{:x}",
+            i,
+            section.name,
+            section.virtual_address,
+            section.pointer_to_raw_data,
+            section.size_of_raw_data
+        );
+
         sections.push(section);
     }
 
     ParsedPe {
         nt_headers,
-        sections: Box::leak(sections.into_boxed_slice()), // make Vec 'static
+        sections: Box::leak(sections.into_boxed_slice()),
         num_sections,
     }
 }
@@ -444,6 +627,143 @@ fn main() {
         check_peb_integrity();
         let k32 = get_kernel32_base();
         println!("kernel32 base = {:?}", k32);
+        let pebis = parse_pe(PAYLOAD);
+        let image_base = pebis.nt_headers.optional_header.data_directory[0].virtual_address;
+        let size_of_image = pebis.nt_headers.optional_header.data_directory[0].size;
+        println!("Export table RVA  = 0x{:x}", image_base);
+        println!("Export table size = 0x{:x}", size_of_image);
+        println!("Sections:");
+        for sect in pebis.sections {
+            println!("  {:8}  RVA: 0x{:x}  RAW: 0x{:x}  SIZE: 0x{:x}",
+                section_name(sect),
+                sect.virtual_address,
+                sect.pointer_to_raw_data,
+                sect.size_of_raw_data);
+        }
+        if let Some((export_dir, offset)) = get_export_directory(&pebis, PAYLOAD) {
+            println!("\n[*] Export Directory found at file offset 0x{:x}", offset);
+            println!("    Characteristics      : 0x{:08x}", export_dir.characteristics);
+            println!("    TimeDateStamp        : 0x{:08x}", export_dir.time_date_stamp);
+            println!("    MajorVersion         : {}", export_dir.major_version);
+            println!("    MinorVersion         : {}", export_dir.minor_version);
+            println!("    Name RVA             : 0x{:08x}", export_dir.name);
+            println!("    Base Ordinal         : {}", export_dir.base);
+            println!("    Number of Functions  : {}", export_dir.number_of_functions);
+            println!("    Number of Names      : {}", export_dir.number_of_names);
+            println!("    AddrOfFunctions RVA  : 0x{:08x}", export_dir.address_of_functions);
+            println!("    AddrOfNames RVA      : 0x{:08x}", export_dir.address_of_names);
+            println!("    AddrOfOrdinals RVA   : 0x{:08x}", export_dir.address_of_name_ordinals);
+        } else {
+            println!("[!] No export directory found.");
+        }
+
+        println!("\n========= [ Comparaison Goblin vs Maison ] =========");
+
+        // Goblin
+        let pe_goblin = PE::parse(PAYLOAD).expect("Goblin parse failed");
+        let gob_header = pe_goblin.header.optional_header.as_ref().unwrap();
+        let gob_image_base = gob_header.windows_fields.image_base;
+        let gob_size_of_image = gob_header.windows_fields.size_of_image;
+        let gob_size_of_headers = gob_header.windows_fields.size_of_headers;
+        let gob_entry_point = gob_header.standard_fields.address_of_entry_point;
+
+        // Maison
+        let maison_fields = get_optional_header_fields(&pebis);
+
+        println!("ImageBase           : goblin = 0x{:x}, maison = 0x{:x}",
+            gob_image_base, maison_fields.image_base);
+        println!("SizeOfImage         : goblin = 0x{:x}, maison = 0x{:x}",
+            gob_size_of_image, maison_fields.size_of_image);
+        println!("SizeOfHeaders       : goblin = 0x{:x}, maison = 0x{:x}",
+            gob_size_of_headers, maison_fields.size_of_headers);
+        println!("AddressOfEntryPoint : goblin = 0x{:x}, maison = 0x{:x}",
+            gob_entry_point, maison_fields.address_of_entry_point);
+
+        // Sections
+        println!("\n========= [ Sections ] =========");
+        for (i, sect) in pe_goblin.sections.iter().enumerate() {
+            let home = &pebis.sections[i];
+            println!(
+                "[{:02}] GOBLIN: {:<8} RVA: 0x{:06x} SIZE: 0x{:06x} | HOME: {:<8} RVA: 0x{:06x} SIZE: 0x{:06x}",
+                i,
+                sect.name().unwrap_or("<?>"),
+                sect.virtual_address,
+                sect.virtual_size,
+                section_name(home),
+                home.virtual_address,
+                home.virtual_size
+            );
+        }
+
+        // Export
+        let goblin_export = gob_header
+            .data_directories
+            .get_export_table()
+            .expect("Pas de Export DataDirectory !");
+        println!(
+            "\n========= [ Export Directory DataDirectory ] =========\n\
+             Goblin : RVA  = 0x{:08x}, Size = 0x{:08x}",
+            goblin_export.virtual_address,
+            goblin_export.size,
+        );
+
+        let maison_export = pebis
+            .nt_headers
+            .optional_header
+            .data_directory[0];
+        println!(
+            "Maison : RVA  = 0x{:08x}, Size = 0x{:08x}",
+            maison_export.virtual_address,
+            maison_export.size
+        );
+
+        // Import
+        let goblin_import = gob_header
+            .data_directories
+            .get_import_table()
+            .expect("Pas de Import DataDirectory !");
+        println!(
+            "\n========= [ Import Directory DataDirectory ] =========\n\
+             Goblin : RVA  = 0x{:08x}, Size = 0x{:08x}",
+            goblin_import.virtual_address,
+            goblin_import.size
+        );
+
+        // Comptage Goblin
+        let goblin_count = pe_goblin.import_data.as_ref().map(|id| id.import_data.len()).unwrap_or(0);
+        println!("Goblin: {} descriptors found.", goblin_count);
+
+        // DataDirectory Maison
+        let maison_import = pebis
+            .nt_headers
+            .optional_header
+            .data_directory[1];
+        println!(
+            "Maison : RVA  = 0x{:08x}, Size = 0x{:08x}",
+            maison_import.virtual_address,
+            maison_import.size
+        );
+
+        // Comptage Maison
+        let maison_descriptors = unsafe { get_import_descriptors(&pebis, PAYLOAD) };
+        let maison_count = maison_descriptors.len();
+        println!("Maison: {} descriptors found.", maison_count);
+
+        // Reloc
+        let goblin_reloc = gob_header.data_directories.get_base_relocation_table().unwrap();
+        println!(
+            "\n========= [ Relocation Directory ] =========\nGoblin: RVA = 0x{:x}, Size = 0x{:x}",
+            goblin_reloc.virtual_address, goblin_reloc.size
+        );
+        if let Some((rva, size)) = get_base_relocation_table(&pebis) {
+            println!("Maison: RVA = 0x{:x}, Size = 0x{:x}", rva, size);
+        } else {
+            println!("Maison: not found.");
+        }
+
+        println!("\n========= [ Suite code qui marche ] =========");
+
+        
         let pe = PE::parse(PAYLOAD).expect("Failed to parse DLL");
         let optional_header = pe.header.optional_header.expect("Failed to get OptionalHeader");
         //let standard_fields = optional_header.standard_fields;
