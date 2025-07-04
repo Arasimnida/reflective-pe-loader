@@ -74,6 +74,101 @@ pub struct PebLdrData {
     pub in_initialization_order_module_list: ListEntry,
 }
 
+#[repr(C)]
+#[derive(Debug)]
+struct ImageDosHeader {
+    e_magic: u16,
+    _unused: [u8; 58],
+    e_lfanew: u32,
+}
+
+#[repr(C)]
+#[derive(Debug)]
+struct ImageFileHeader {
+    _pad: [u8; 20], // on ne s’en sert pas ici
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+struct ImageDataDirectory {
+    virtual_address: u32,
+    size: u32,
+}
+
+#[repr(C)]
+#[derive(Debug)]
+struct ImageOptionalHeader64 {
+    _pad: [u8; 96], // jusqu’à data_directory
+    data_directory: [ImageDataDirectory; 16],
+}
+
+#[repr(C)]
+#[derive(Debug)]
+struct ImageNtHeaders64 {
+    signature: u32,
+    file_header: ImageFileHeader,
+    optional_header: ImageOptionalHeader64,
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+struct ImageSectionHeader {
+    name: [u8; 8],
+    virtual_size: u32,
+    virtual_address: u32,
+    size_of_raw_data: u32,
+    pointer_to_raw_data: u32,
+    _pad: [u8; 16],
+    characteristics: u32,
+}
+
+#[derive(Debug)]
+struct ParsedPe<'a> {
+    nt_headers: &'a ImageNtHeaders64,
+    sections: &'a [ImageSectionHeader],
+}
+
+#[allow(unsafe_op_in_unsafe_fn)]
+unsafe fn parse_pe(payload: &[u8]) -> ParsedPe<'_> {
+    let dos = &*(payload.as_ptr() as *const ImageDosHeader);
+    assert_eq!(dos.e_magic, 0x5A4D, "Invalid DOS header (MZ)");
+
+    let nt_offset = dos.e_lfanew as usize;
+    let nt_headers = &*(payload.as_ptr().add(nt_offset) as *const ImageNtHeaders64);
+    assert_eq!(nt_headers.signature, 0x00004550, "Invalid NT header (PE)");
+
+    let num_sections = std::ptr::read_unaligned(
+        payload.as_ptr().add(nt_offset + 6) as *const u16
+    ) as usize;
+
+    let size_of_optional_header = std::ptr::read_unaligned(
+        payload.as_ptr().add(nt_offset + 4 + 16) as *const u16
+    ) as usize;
+
+    let section_start = nt_offset + 4 + std::mem::size_of::<ImageFileHeader>() + size_of_optional_header;
+    let mut sections = Vec::with_capacity(num_sections);
+
+    for i in 0..num_sections {
+        let offset = section_start + i * std::mem::size_of::<ImageSectionHeader>();
+        let section_ptr = payload.as_ptr().add(offset) as *const ImageSectionHeader;
+        let section = std::ptr::read_unaligned(section_ptr);
+        sections.push(section);
+    }
+
+    ParsedPe {
+        nt_headers,
+        sections: Box::leak(sections.into_boxed_slice()), // make Vec 'static
+    }
+}
+
+fn section_name(section: &ImageSectionHeader) -> String {
+    let end = section.name.iter().position(|&b| b == 0).unwrap_or(8);
+    section.name[..end]
+        .iter()
+        .map(|&c| if c.is_ascii_graphic() || c == b' ' { c as char } else { '.' })
+        .collect()
+}
+
 #[allow(unsafe_op_in_unsafe_fn)]
 unsafe fn alloc_exec_region(size: usize) -> *mut u8 {
     let alloc_address = VirtualAlloc(
