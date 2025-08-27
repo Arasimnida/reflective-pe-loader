@@ -1,6 +1,6 @@
 #[repr(C)]
 #[derive(Debug)]
-struct ImageDosHeader {
+pub struct ImageDosHeader {
     e_magic: u16,
     _unused: [u8; 58],
     e_lfanew: u32,
@@ -8,20 +8,20 @@ struct ImageDosHeader {
 
 #[repr(C)]
 #[derive(Debug)]
-struct ImageFileHeader {
+pub struct ImageFileHeader {
     _pad: [u8; 20],
 }
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
-struct ImageDataDirectory {
+pub struct ImageDataDirectory {
     virtual_address: u32,
     size: u32,
 }
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
-struct ImageOptionalHeader64 {
+pub struct ImageOptionalHeader64 {
     magic: u16,
     major_linker_version: u8,
     minor_linker_version: u8,
@@ -56,7 +56,7 @@ struct ImageOptionalHeader64 {
 
 #[repr(C)]
 #[derive(Debug)]
-struct ImageNtHeaders64 {
+pub struct ImageNtHeaders64 {
     signature: u32,
     file_header: ImageFileHeader,
     optional_header: ImageOptionalHeader64,
@@ -64,7 +64,7 @@ struct ImageNtHeaders64 {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
-struct ImageSectionHeader {
+pub struct ImageSectionHeader {
     name: [u8; 8],
     virtual_size: u32,
     virtual_address: u32,
@@ -76,7 +76,7 @@ struct ImageSectionHeader {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ImageImportDescriptor {
+pub struct ImageImportDescriptor {
     original_first_thunk: u32,
     time_date_stamp:      u32,
     forwarder_chain:      u32,
@@ -86,14 +86,14 @@ struct ImageImportDescriptor {
 
 #[repr(C)]
 #[derive(Debug)]
-struct ImageImportByName {
+pub struct ImageImportByName {
     hint: u16,
     name: [u8; 1],
 }
 
 #[repr(C)]
 #[derive(Debug)]
-struct ImageExportDirectory {
+pub struct ImageExportDirectory {
     characteristics: u32,
     time_date_stamp: u32,
     major_version: u16,
@@ -109,7 +109,7 @@ struct ImageExportDirectory {
 
 #[repr(C)]
 #[derive(Copy, Clone)]
-struct ImageTlsDirectory64 {
+pub struct ImageTlsDirectory64 {
     start_address_of_raw_data: u64,
     end_address_of_raw_data:   u64,
     address_of_index:          u64,
