@@ -1,13 +1,13 @@
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct ImageDosHeader {
-    e_magic: u16,
+    pub e_magic: u16,
     _unused: [u8; 58],
     e_lfanew: u32,
 }
 
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct ImageFileHeader {
     _pad: [u8; 20],
 }
@@ -55,7 +55,7 @@ pub struct ImageOptionalHeader64 {
 }
 
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct ImageNtHeaders64 {
     signature: u32,
     file_header: ImageFileHeader,
