@@ -11,3 +11,4 @@ windows = { version = "0.60.0", features = [
 ] }
 goblin = "0.10.0"
 scroll = "0.13.0"
+sha2 = "0.10"
