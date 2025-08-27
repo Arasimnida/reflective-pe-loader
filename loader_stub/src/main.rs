@@ -745,7 +745,7 @@ fn main() {
         );
 
         // Comptage Maison
-        let maison_descriptors = unsafe { get_import_descriptors(&pebis, PAYLOAD) };
+        let maison_descriptors = get_import_descriptors(&pebis, PAYLOAD);
         let maison_count = maison_descriptors.len();
         println!("Maison: {} descriptors found.", maison_count);
 
