@@ -3,7 +3,7 @@
 pub struct ImageDosHeader {
     pub e_magic: u16,
     _unused: [u8; 58],
-    e_lfanew: u32,
+    pub e_lfanew: u32,
 }
 
 #[repr(C)]
@@ -57,7 +57,7 @@ pub struct ImageOptionalHeader64 {
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct ImageNtHeaders64 {
-    signature: u32,
+    pub signature: u32,
     file_header: ImageFileHeader,
     optional_header: ImageOptionalHeader64,
 }

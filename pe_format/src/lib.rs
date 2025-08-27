@@ -19,16 +19,25 @@ pub enum PeError {
 pub struct PeImage<'a> {
     data: &'a [u8],
     dos: ImageDosHeader,
+    nt64: ImageNtHeaders64, // for PE32+ (x64)
 }
 
 impl<'a> PeImage<'a> {
     pub fn parse(data: &'a [u8]) -> Result<Self, PeError> {
+        // DOS
         ensure_len(data, size_of::<ImageDosHeader>())?;
         let dos = unsafe { read_unaligned::<ImageDosHeader>(data, 0)? };
         if dos.e_magic != 0x5A4D { // 'MZ'
             return Err(PeError::BadDos);
         }
-        Ok(PeImage { data, dos })
+
+        // NT
+        let nt_offset = dos.e_lfanew as usize;
+        ensure_len_from(data, nt_offset, size_of::<ImageDosHeader>())?;
+        let nt64 = unsafe { read_unaligned::<ImageNtHeaders64>(data, nt_offset)? };
+        if nt64.signature != 0x00004550 { return Err(PeError::BadNt) };
+        
+        Ok(PeImage { data, dos, nt64 })
     }
 }
 
