@@ -34,7 +34,7 @@ impl<'a> PeImage<'a> {
 
         // NT
         let nt_offset = dos.e_lfanew as usize;
-        ensure_len_from(data, nt_offset, size_of::<ImageDosHeader>())?;
+        ensure_len_from(data, nt_offset, size_of::<ImageNtHeaders64>())?;
         let nt64 = unsafe { read_unaligned::<ImageNtHeaders64>(data, nt_offset)? };
         if nt64.signature != 0x00004550 { return Err(PeError::BadNt) };
 
@@ -74,6 +74,7 @@ impl<'a> PeImage<'a> {
 
     pub fn entry_rva(&self) -> u32 { self.nt64.optional_header.address_of_entry_point }
 
+    // if rva < size of header then we return the offset
     pub fn rva_to_offset(&self, rva: usize) -> Option<usize> {
         if rva < self.size_of_headers() as usize { return Some(rva); }
         for s in &self.sections {
