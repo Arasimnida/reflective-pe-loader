@@ -65,6 +65,58 @@ impl<'a> PeImage<'a> {
         let end = section.name.iter().position(|&b| b == 0).unwrap_or(8);
         core::str::from_utf8(&section.name[..end]).unwrap_or("")
     }
+
+    pub fn preferred_base(&self) -> u64 { self.nt64.optional_header.image_base }
+
+    pub fn size_of_image(&self) -> u32 { self.nt64.optional_header.size_of_image }
+
+    pub fn size_of_headers(&self) -> u32 { self.nt64.optional_header.size_of_headers }
+
+    pub fn entry_rva(&self) -> u32 { self.nt64.optional_header.address_of_entry_point }
+
+    pub fn rva_to_offset(&self, rva: usize) -> Option<usize> {
+        if rva < self.size_of_headers() as usize { return Some(rva); }
+        for s in &self.sections {
+            let va = s.virtual_address as usize;
+            let vs = s.virtual_size as usize;
+            if (va..va+vs).contains(&rva) {
+                let delta = rva - va;
+                let raw  = s.pointer_to_raw_data as usize;
+                let raw_size = s.size_of_raw_data as usize;
+                return (delta < raw_size).then_some(raw + delta);
+            }
+        }
+        None 
+    }
+
+    pub fn rva_to_range(&self, rva: u32, size: usize) -> Option<&'a [u8]> {
+        let off = self.rva_to_offset(rva as usize)?;
+        self.data.get(off..off+size)
+    }
+
+    pub fn dir(&self, index: usize) -> Option<ImageDataDirectory> {
+        self.nt64.optional_header.data_directory
+            .get(index)
+            .copied()
+            .filter(|d| d.virtual_address != 0 && d.size != 0)
+    }
+
+    pub fn import_descriptors(&self) -> Option<&'a [ImageImportDescriptor]> {
+        let dir = self.dir(1)?;
+        let start = self.rva_to_offset(dir.virtual_address as usize)?;
+        let bytes = self.data.get(start..start+dir.size as usize)?;
+        let mut count = 0usize;
+        let element = size_of::<ImageImportDescriptor>();
+        while (count + 1) * element <= bytes.len() {
+            let offset = count * element;
+            let descriptor = unsafe { &*(bytes.as_ptr().add(offset) as *const ImageImportDescriptor) };            
+            if descriptor.original_first_thunk == 0 && descriptor.first_thunk == 0 && descriptor.name == 0 { break; }
+            count += 1;
+        }
+        Some(unsafe {
+            core::slice::from_raw_parts(bytes.as_ptr() as *const ImageImportDescriptor, count)
+        })
+    }
 }
 
 #[allow(unsafe_op_in_unsafe_fn)]
