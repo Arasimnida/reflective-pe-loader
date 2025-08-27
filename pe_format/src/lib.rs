@@ -20,6 +20,7 @@ pub struct PeImage<'a> {
     data: &'a [u8],
     dos: ImageDosHeader,
     nt64: ImageNtHeaders64, // for PE32+ (x64)
+    sections: Vec<ImageSectionHeader>,
 }
 
 impl<'a> PeImage<'a> {
@@ -36,8 +37,33 @@ impl<'a> PeImage<'a> {
         ensure_len_from(data, nt_offset, size_of::<ImageDosHeader>())?;
         let nt64 = unsafe { read_unaligned::<ImageNtHeaders64>(data, nt_offset)? };
         if nt64.signature != 0x00004550 { return Err(PeError::BadNt) };
-        
-        Ok(PeImage { data, dos, nt64 })
+
+        if nt64.optional_header.magic != 0x20B {
+            return Err(PeError::UnsupportedMagic)
+        }
+
+        // Sections
+        let num_sections = nt64.file_header.number_of_sections as usize;
+        let size_opt = nt64.file_header.size_of_optional_header as usize;
+        // + 4 since 'PE\0\0' is 4 bytes
+        let sec_start = nt_offset + 4 + core::mem::size_of::<ImageFileHeader>() + size_opt;
+        let sec_size = core::mem::size_of::<ImageSectionHeader>();
+        let mut sections = Vec::with_capacity(num_sections);
+        for i in 0..num_sections {
+            let offset = sec_start + i * sec_size;
+            ensure_len_from(data, offset, sec_size)?;
+            let sh = unsafe { read_unaligned::<ImageSectionHeader>(data, offset)?};
+            sections.push(sh);
+        }
+
+        Ok(PeImage { data, dos, nt64, sections })
+    }
+
+    pub fn sections(&self) -> &[ImageSectionHeader] { &self.sections }
+
+    pub fn section_name(section: &ImageSectionHeader) -> &str {
+        let end = section.name.iter().position(|&b| b == 0).unwrap_or(8);
+        core::str::from_utf8(&section.name[..end]).unwrap_or("")
     }
 }
 
