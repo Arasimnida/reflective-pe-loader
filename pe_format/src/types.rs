@@ -9,8 +9,15 @@ pub struct ImageDosHeader {
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct ImageFileHeader {
-    _pad: [u8; 20],
+    pub machine: u16,
+    pub number_of_sections: u16,
+    pub time_date_stamp: u32,
+    pub pointer_to_symbol_table: u32,
+    pub number_of_symbols: u32,
+    pub size_of_optional_header: u16,
+    pub characteristics: u16,
 }
+
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -22,98 +29,98 @@ pub struct ImageDataDirectory {
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct ImageOptionalHeader64 {
-    magic: u16,
-    major_linker_version: u8,
-    minor_linker_version: u8,
-    size_of_code: u32,
-    size_of_initialized_data: u32,
-    size_of_uninitialized_data: u32,
-    address_of_entry_point: u32,
-    base_of_code: u32,
-    image_base: u64,
-    section_alignment: u32,
-    file_alignment: u32,
-    major_operating_system_version: u16,
-    minor_operating_system_version: u16,
-    major_image_version: u16,
-    minor_image_version: u16,
-    major_subsystem_version: u16,
-    minor_subsystem_version: u16,
-    win32_version_value: u32,
-    size_of_image: u32,
-    size_of_headers: u32,
-    checksum: u32,
-    subsystem: u16,
-    dll_characteristics: u16,
-    size_of_stack_reserve: u64,
-    size_of_stack_commit: u64,
-    size_of_heap_reserve: u64,
-    size_of_heap_commit: u64,
-    loader_flags: u32,
-    number_of_rva_and_sizes: u32,
-    data_directory: [ImageDataDirectory; 16],
+    pub magic: u16,
+    pub major_linker_version: u8,
+    pub minor_linker_version: u8,
+    pub size_of_code: u32,
+    pub size_of_initialized_data: u32,
+    pub size_of_uninitialized_data: u32,
+    pub address_of_entry_point: u32,
+    pub base_of_code: u32,
+    pub image_base: u64,
+    pub section_alignment: u32,
+    pub file_alignment: u32,
+    pub major_operating_system_version: u16,
+    pub minor_operating_system_version: u16,
+    pub major_image_version: u16,
+    pub minor_image_version: u16,
+    pub major_subsystem_version: u16,
+    pub minor_subsystem_version: u16,
+    pub win32_version_value: u32,
+    pub size_of_image: u32,
+    pub size_of_headers: u32,
+    pub checksum: u32,
+    pub subsystem: u16,
+    pub dll_characteristics: u16,
+    pub size_of_stack_reserve: u64,
+    pub size_of_stack_commit: u64,
+    pub size_of_heap_reserve: u64,
+    pub size_of_heap_commit: u64,
+    pub loader_flags: u32,
+    pub number_of_rva_and_sizes: u32,
+    pub data_directory: [ImageDataDirectory; 16],
 }
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct ImageNtHeaders64 {
     pub signature: u32,
-    file_header: ImageFileHeader,
-    optional_header: ImageOptionalHeader64,
+    pub file_header: ImageFileHeader,
+    pub optional_header: ImageOptionalHeader64,
 }
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct ImageSectionHeader {
-    name: [u8; 8],
-    virtual_size: u32,
-    virtual_address: u32,
-    size_of_raw_data: u32,
-    pointer_to_raw_data: u32,
-    _pad: [u8; 12],
-    characteristics: u32,
+    pub name: [u8; 8],
+    pub virtual_size: u32,
+    pub virtual_address: u32,
+    pub size_of_raw_data: u32,
+    pub pointer_to_raw_data: u32,
+    pub _pad: [u8; 12],
+    pub characteristics: u32,
 }
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ImageImportDescriptor {
-    original_first_thunk: u32,
-    time_date_stamp:      u32,
-    forwarder_chain:      u32,
-    name:                 u32,
-    first_thunk:          u32,
+    pub original_first_thunk: u32,
+    pub time_date_stamp:      u32,
+    pub forwarder_chain:      u32,
+    pub name:                 u32,
+    pub first_thunk:          u32,
 }
 
 #[repr(C)]
 #[derive(Debug)]
 pub struct ImageImportByName {
-    hint: u16,
-    name: [u8; 1],
+    pub hint: u16,
+    pub name: [u8; 1],
 }
 
 #[repr(C)]
 #[derive(Debug)]
 pub struct ImageExportDirectory {
-    characteristics: u32,
-    time_date_stamp: u32,
-    major_version: u16,
-    minor_version: u16,
-    name: u32,
-    base: u32,
-    number_of_functions: u32,
-    number_of_names: u32,
-    address_of_functions: u32,
-    address_of_names: u32,
-    address_of_name_ordinals: u32,
+    pub characteristics: u32,
+    pub time_date_stamp: u32,
+    pub major_version: u16,
+    pub minor_version: u16,
+    pub name: u32,
+    pub base: u32,
+    pub number_of_functions: u32,
+    pub number_of_names: u32,
+    pub address_of_functions: u32,
+    pub address_of_names: u32,
+    pub address_of_name_ordinals: u32,
 }
 
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct ImageTlsDirectory64 {
-    start_address_of_raw_data: u64,
-    end_address_of_raw_data:   u64,
-    address_of_index:          u64,
-    address_of_callbacks:      u64,
-    size_of_zero_fill:         u32,
-    characteristics:           u32,
+    pub start_address_of_raw_data: u64,
+    pub end_address_of_raw_data:   u64,
+    pub address_of_index:          u64,
+    pub address_of_callbacks:      u64,
+    pub size_of_zero_fill:         u32,
+    pub characteristics:           u32,
 }
