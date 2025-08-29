@@ -6,3 +6,8 @@ edition = "2024"
 [dependencies]
 pe_format = { path = "../pe_format" }
 thiserror = "1"
+windows = { version = "0.60.0", features = [
+  "Win32_System_Memory",
+  "Win32_Foundation",
+  "Win32_System_LibraryLoader"
+] }
