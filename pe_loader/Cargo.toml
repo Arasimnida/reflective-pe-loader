@@ -1,0 +1,8 @@
+[package]
+name = "pe_loader"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+pe_format = { path = "../pe_format" }
+thiserror = "1"

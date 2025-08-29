@@ -1,2 +1,2 @@
 [workspace]
-members = ["loader_stub", "pe_format"]
+members = ["loader_stub", "pe_format", "pe_loader"]
