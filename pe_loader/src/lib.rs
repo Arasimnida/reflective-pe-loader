@@ -29,7 +29,7 @@ pub fn map_image(img: &PeImage) -> Result<LoadedImage, LoaderError> {
     let base = copy::copy_header_and_sections(img)?;
     reloc::apply_relocations(img, base)?;
     imports::resolve_imports(img, base)?;
-    protect::finalise_sections_protections(img, base)?;
+    protect::finalise_section_protections(img, base)?;
     let tls_callbacks = tls::collect_tls_callbacks(img, base)?;
     let entry = base + img.entry_rva() as usize;
     let is_dll = true; // to change in order to be able to load exe as well

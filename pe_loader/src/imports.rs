@@ -1,5 +1,5 @@
 use crate::LoaderError;
-use pe_format::{PeImage, ImageImportDescriptor};
+use pe_format::PeImage;
 use std::ffi::CString;
 use windows::{
     core::PCSTR,
@@ -9,7 +9,6 @@ use windows::{
         GetProcAddress
     },
 };
-
 
 const IMAGE_ORDINAL_FLAG64: u64 = 0x8000_0000_0000_0000;
 struct ImportByName<'a> {
