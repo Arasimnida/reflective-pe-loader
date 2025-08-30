@@ -74,6 +74,8 @@ impl<'a> PeImage<'a> {
 
     pub fn entry_rva(&self) -> u32 { self.nt64.optional_header.address_of_entry_point }
 
+    pub fn as_bytes(&self) -> &[u8] { self.data }
+
     // if rva < size of header then we return the offset
     pub fn rva_to_offset(&self, rva: usize) -> Option<usize> {
         if rva < self.size_of_headers() as usize { return Some(rva); }
