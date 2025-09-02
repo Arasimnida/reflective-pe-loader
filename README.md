@@ -4,48 +4,62 @@
 >    This is a project for demonstration, research, pentesting/red-teaming and learning purposes only. 
 >    Don't use it for anything illegal, please respect the law.
 
-This project is a focused, Rust‑driven study of **manual PE loading on 64‑bit Windows**.  The loader operates entirely from an in‑memory byte slice—no file on disk, no call to LoadLibrary. It replicates every step the native loader performs: section mapping, relocations, import resolution, TLS initialisation and finally a transfer of control to DllMain. Making it a compact building‑block for more advanced trade‑craft.
+This project implements a manual mapping PE loader written in Rust.
+The loader is designed for academic use within the scope of Windows internals and low-level security research. Its purpose is to illustrate how Windows loads Portable Executables (PE) at runtime, and how each step of the process can be replicated in userland without invoking the standard loader.
 
 ---
 
-## Repository layout
+## Overview
+
+The code is separated into dedicated crates for clarity:
+
+- `pe_format/` responsible for parsing PE headers, section tables, and data directories. Provides safe abstractions over the DOS, NT, section, and directory structures.
+
+- `pe_loader/` implements the manual mapping algorithm, step by step: Reserving memory and copying headers/sections. Applying relocations if the preferred base cannot be honored. Resolving imports and writing the Import Address Table (IAT). Adjusting memory protections according to section characteristics. Collecting TLS callbacks.
+
+- `loader_stub/` demonstration program. Loads a test DLL (MessageBox example), invokes the loader pipeline, logs the operations for analysis and execution of the entry point.
+
+## Intended Audience
+
+This work is intended for researchers, students, and professionals interested in:
+
+- Understanding the internals of the Windows PE loader.
+- Studying how memory managers handle relocations, imports, and section protections.
+- Comparing system loader behavior against a controlled userland re-implementation.
+
+## Project Structure
 
 ```
 .
-├─ Cargo.toml / Cargo.lock
-├─ LICENSE                          
-├─ loader_stub/                     
-│  ├─ Cargo.toml    
-│  └─ src/  
-│     ├─ main.rs
-│     └─ payload_messagebox.dll  # demo DLL (x64)
-└─ README.md
+├── Cargo.lock
+├── Cargo.toml
+├── LICENSE
+│
+├── loader_stub/                    # Demonstration binary
+│   ├── Cargo.toml
+│   └── src/
+│       ├── main.rs                 # Orchestration of the demo: parse, map, log
+│       ├── payload_messagebox.dll  # Test DLL (MessageBox) used as input
+│       └── utils.rs                # Utility functions (support for future extensions)
+│
+├── pe_format/                      # Low-level PE parsing library
+│   ├── Cargo.toml
+│   └── src/
+│       ├── lib.rs                  # Core parsing logic and high-level PeImage abstraction
+│       └── types.rs                # Structs representing DOS/NT headers, sections, data directories
+│
+├── pe_loader/                      # Manual mapping implementation
+│   ├── Cargo.toml
+│   └── src/
+│       ├── lib.rs                  # Loader orchestrator (map_image) and public API
+│       ├── copy.rs                 # Memory allocation, headers and sections copy
+│       ├── reloc.rs                # Relocation handling (DIR64)
+│       ├── imports.rs              # Import resolution (IAT population)
+│       ├── protect.rs              # Section protection adjustment (VirtualProtect)
+│       └── tls.rs                  # TLS directory parsing and callbacks collection
+│
+└── README.md
 ```
-
-## Current capabilities
-
-* Section mapping and zero‑initialisation of `.bss`
-* Base relocation (64‑bit `IMAGE_REL_BASED_DIR64`)
-* Import Address Table fix‑up via Win32 API
-* TLS directory parsing and callback execution
-* Per‑section page protection (`.text` => RX, `.data` => RW, etc.)
-* Execution of `DllMain` with `DLL_PROCESS_ATTACH`
-
-Running `loader_stub.exe` on Windows opens the demo MessageBox supplied by `payload_messagebox.dll`, demonstrating a complete in‑memory load.
-
-## Roadmap
-
-| Phase | Description                                                     | Status       |
-| ----- | --------------------------------------------------------------- | ------------ |
-| 1     | In‑process loader (baseline)                                    | **complete** |
-| 2     | Remote injection – `NtCreateThreadEx` with manual‑mapped buffer | in progress  |
-| 3     | Silent import resolver (PEB export walk, hash lookup)           | planned      |
-| 4     | Payload encryption / polymorphic stub                           | planned      |
-| 5     | Graceful detach and memory cleanup                              | planned      |
-| 6     | Section‑mapping hollowing                                       | planned      |
-| 7     | Anti‑analysis features (ETW, anti‑debug)                        | planned      |
-
-*The order is incremental: each phase introduces one new capability while retaining strict separation of concerns.*
 
 ## Building
 
@@ -56,7 +70,11 @@ cd loader_stub
 cargo build --release --target x86_64-pc-windows-gnu
 ```
 
-Copy `loader_stub/target/x86_64-pc-windows-gnu/release/loader_stub.exe` to a Windows test machine and run.  The program prints diagnostic output to the console and shows the MessageBox if the load succeeds.
+Copy `loader_stub/target/x86_64-pc-windows-gnu/release/loader_stub.exe` to a Windows test machine and run. The program prints diagnostic output to the console and shows the MessageBox if the load succeeds.
+
+## Limitations
+
+- Only 64-bit (x64) DLL are supported.
 
 ## Licence
 

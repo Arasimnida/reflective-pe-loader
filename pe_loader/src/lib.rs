@@ -21,7 +21,7 @@ pub enum Protection { R, RW, RX, RWX }
 pub struct LoadedImage {
     pub base: usize,
     pub entry: usize,
-    pub tls_callback: Vec<usize>,
+    pub tls_callbacks: Vec<usize>,
     pub is_dll: bool
 }
 
@@ -34,5 +34,5 @@ pub fn map_image(img: &PeImage) -> Result<LoadedImage, LoaderError> {
     let entry = base + img.entry_rva() as usize;
     let is_dll = true; // to change in order to be able to load exe as well
 
-    Ok(LoadedImage { base: base, entry: entry, tls_callback: tls_callbacks, is_dll: is_dll } )
+    Ok(LoadedImage { base: base, entry: entry, tls_callbacks: tls_callbacks, is_dll: is_dll } )
 }
