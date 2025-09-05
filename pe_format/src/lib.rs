@@ -1,7 +1,6 @@
 mod types;
 pub use types::*;
 
-use core::mem::size_of;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -34,7 +33,7 @@ enum NtHeaders {
 impl<'a> PeImage<'a> {
     pub fn parse(data: &'a [u8]) -> Result<Self, PeError> {
         // DOS
-        ensure_len(data, size_of::<ImageDosHeader>())?;
+        ensure_len(data, core::mem::size_of::<ImageDosHeader>())?;
         let dos = unsafe { read_unaligned::<ImageDosHeader>(data, 0)? };
         if dos.e_magic != 0x5A4D { // 'MZ'
             return Err(PeError::BadDos);
@@ -44,19 +43,19 @@ impl<'a> PeImage<'a> {
         let nt_offset = dos.e_lfanew as usize;
         let signature_offset = nt_offset;
         let file_header_offset = nt_offset + 4;
-        let magic_offset = file_header_offset + size_of::<ImageFileHeader>();
+        let magic_offset = file_header_offset + core::mem::size_of::<ImageFileHeader>();
         ensure_len_from(data, nt_offset, 4 + size_of::<ImageFileHeader>() + 2)?;
         let signature = unsafe { read_unaligned::<u32>(data, signature_offset)? };
         if signature != 0x00004550 { return Err(PeError::BadNt) };
         let magic = unsafe { read_unaligned::<u16>(data, magic_offset)? };
         let nt = match magic {
             0x10B => {
-                ensure_len_from(data, nt_offset, size_of::<ImageNtHeaders32>())?;
+                ensure_len_from(data, nt_offset, core::mem::size_of::<ImageNtHeaders32>())?;
                 let nt32 = unsafe { read_unaligned::<ImageNtHeaders32>(data, nt_offset)? };
                 NtHeaders::X86(nt32)
             }
             0x20B => {
-                ensure_len_from(data, nt_offset, size_of::<ImageNtHeaders64>())?;
+                ensure_len_from(data, nt_offset, core::mem::size_of::<ImageNtHeaders64>())?;
                 let nt64 = unsafe { read_unaligned::<ImageNtHeaders64>(data, nt_offset)? };
                 NtHeaders::X64(nt64)
             }
@@ -146,7 +145,7 @@ impl<'a> PeImage<'a> {
         let start = self.rva_to_offset(dir.virtual_address as usize)?;
         let bytes = self.data.get(start..start+dir.size as usize)?;
         let mut count = 0usize;
-        let element = size_of::<ImageImportDescriptor>();
+        let element = core::mem::size_of::<ImageImportDescriptor>();
         while (count + 1) * element <= bytes.len() {
             let offset = count * element;
             let descriptor = unsafe { &*(bytes.as_ptr().add(offset) as *const ImageImportDescriptor) };            
