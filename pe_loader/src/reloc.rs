@@ -1,5 +1,5 @@
 use crate::LoaderError;
-use pe_format::PeImage;
+use pe_format::{PeImage, Arch};
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -14,13 +14,6 @@ const IMAGE_REL_BASED_DIR64:    u16 = 10; // x64 (64-bit)
 
 pub fn apply_relocations(img: &PeImage, base: usize) -> Result<(), LoaderError> {
     let Some(reloc_dir) = img.dir(5) else { return Ok(()); };
-
-    let preferred = img.preferred_base() as i64;
-    let actual = base as i64;
-    let delta = actual - preferred;
-    if delta == 0 {
-        return Ok(());
-    }
 
     let dir_off = img.rva_to_offset(reloc_dir.virtual_address as usize)
         .ok_or(LoaderError::Format("reloc directory out of file"))?;
@@ -53,24 +46,33 @@ pub fn apply_relocations(img: &PeImage, base: usize) -> Result<(), LoaderError> 
             let typ = entry >> 12;
             let ofs = (entry & 0x0FFF) as usize;
 
-            match typ {
-                IMAGE_REL_BASED_ABSOLUTE => {}
-                IMAGE_REL_BASED_DIR64 => {
+            match (img.arch(), typ) {
+                (_, IMAGE_REL_BASED_ABSOLUTE) => {}
+                (Arch::X64, IMAGE_REL_BASED_DIR64) => {
                     let target_rva = block.virtual_address as usize + ofs;
-
                     if target_rva + 8 > img.size_of_image() as usize {
                         return Err(LoaderError::Format("reloc target outside image"));
                     }
-
                     unsafe {
                         let p = (base as *mut u8).add(target_rva) as *mut u64;
                         let orig = core::ptr::read_unaligned(p);
-                        let patched = (orig as i64).wrapping_add(delta) as u64;
+                        let delta64 = (base as i64).wrapping_sub(img.preferred_base() as i64);
+                        let patched = (orig as i64).wrapping_add(delta64) as u64;
                         core::ptr::write_unaligned(p, patched);
                     }
                 }
-                IMAGE_REL_BASED_HIGHLOW => {
-                    return Err(LoaderError::Map("x86 HIGHLOW reloc not implemented yet"));
+                (Arch::X86, IMAGE_REL_BASED_HIGHLOW) => {
+                    let target_rva = block.virtual_address as usize + ofs;
+                    if target_rva + 4 > img.size_of_image() as usize {
+                        return Err(LoaderError::Format("reloc target outside image"))
+                    }
+                    unsafe {
+                        let p = (base as *mut u8).add(target_rva) as *mut u32;
+                        let orig = core::ptr::read_unaligned(p);
+                        let delta32 = ((base as i64) - (img.preferred_base() as i64)) as i32;
+                        let patched = (orig as i32).wrapping_add(delta32) as u32;
+                        core::ptr::write_unaligned(p, patched);
+                    }
                 }
                 _ => {
                     return Err(LoaderError::Map("unsupported relocation type"));

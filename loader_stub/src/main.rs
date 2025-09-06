@@ -5,7 +5,7 @@ use pe_loader::{map_image, LoaderError};
 pub mod utils;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let payload: &'static [u8] = include_bytes!("payload_messagebox.dll");
+    let payload: &'static [u8] = include_bytes!("payload_messagebox_x86.dll");
 
     let img = PeImage::parse(payload).map_err(|e| format!("PE parse error: {e}"))?;
 

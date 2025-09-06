@@ -4,7 +4,7 @@
 >    This is a project for demonstration, research, pentesting/red-teaming and learning purposes only. 
 >    Don't use it for anything illegal, please respect the law.
 
-This project implements a manual mapping PE loader written in Rust.
+This project implements a manual mapping PE loader (PE32 & PE32+) written in Rust.
 The loader is designed for academic use within the scope of Windows internals and low-level security research. Its purpose is to illustrate how Windows loads Portable Executables (PE) at runtime, and how each step of the process can be replicated in userland without invoking the standard loader.
 
 ---
@@ -17,7 +17,7 @@ The code is separated into dedicated crates for clarity:
 
 - `pe_loader/` implements the manual mapping algorithm, step by step: Reserving memory and copying headers/sections. Applying relocations if the preferred base cannot be honored. Resolving imports and writing the Import Address Table (IAT). Adjusting memory protections according to section characteristics. Collecting TLS callbacks.
 
-- `loader_stub/` demonstration program. Loads a test DLL (MessageBox example), invokes the loader pipeline, logs the operations for analysis and execution of the entry point.
+- `loader_stub/` demonstration program. Loads a test DLL (MessageBox example), invokes the loader pipeline, logs the operations for analysis and execution of the entry point. There is two different paylaods, one for each architecture, you can change main.rs in order to load the selected paylaod.
 
 ## Intended Audience
 
@@ -67,14 +67,17 @@ This work is intended for researchers, students, and professionals interested in
 # on a Windows host or cross‑compiled toolchain
 git clone <repo>
 cd loader_stub
+# For x64 payload
 cargo build --release --target x86_64-pc-windows-gnu
+# For x86 payload
+cargo build --release --target i686-pc-windows-gnu
 ```
 
-Copy `loader_stub/target/x86_64-pc-windows-gnu/release/loader_stub.exe` to a Windows test machine and run. The program prints diagnostic output to the console and shows the MessageBox if the load succeeds.
+Copy `loader_stub/target/x86_64-pc-windows-gnu/release/loader_stub.exe` or `loader_stub/target/i686-pc-windows-gnu/release/loader_stub.exe` to a Windows test machine and run. The program prints diagnostic output to the console and shows the MessageBox if the load succeeds.
 
 ## Limitations
 
-- Only 64-bit (x64) DLL are supported.
+- Only DLL are supported.
 
 ## Licence
 
