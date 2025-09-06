@@ -70,7 +70,7 @@ pub fn apply_relocations(img: &PeImage, base: usize) -> Result<(), LoaderError> 
                         let p = (base as *mut u8).add(target_rva) as *mut u32;
                         let orig = core::ptr::read_unaligned(p);
                         let delta32 = ((base as i64) - (img.preferred_base() as i64)) as i32;
-                        let patched = (orig as i32).wrapping_sub(delta32) as u32;
+                        let patched = (orig as i32).wrapping_add(delta32) as u32;
                         core::ptr::write_unaligned(p, patched);
                     }
                 }
