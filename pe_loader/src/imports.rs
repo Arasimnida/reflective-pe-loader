@@ -1,5 +1,5 @@
 use crate::LoaderError;
-use pe_format::PeImage;
+use pe_format::{PeImage, Arch};
 use std::ffi::CString;
 use windows::{
     core::PCSTR,
@@ -10,7 +10,6 @@ use windows::{
     },
 };
 
-const IMAGE_ORDINAL_FLAG64: u64 = 0x8000_0000_0000_0000;
 struct ImportByName<'a> {
     #[allow(dead_code)]
     hint: u16,
@@ -31,23 +30,29 @@ pub fn resolve_imports(img: &PeImage, base: usize) -> Result<(), LoaderError> {
 
         let mut int_rva = desc.original_first_thunk;
         let mut iat_rva = desc.first_thunk;
+        let stride = thunk_stride(img);
+        let ordinal_flag = ordinal_flag(img);
 
         loop {
-            let thunk_val = read_u64_from_file(img, int_rva)?;
-            if thunk_val == 0 { break; }
-
-            let addr: usize = if (thunk_val & IMAGE_ORDINAL_FLAG64) != 0 {
-            let ord = (thunk_val & 0xFFFF) as u16;
-            os_get_proc_by_ordinal(hmod, ord)?
-        } else {
-            let name_rva = (thunk_val & 0xFFFF_FFFF) as u32;
-            let bin = read_import_by_name(img, name_rva)?;
-            os_get_proc_by_name(hmod, bin.name)?
-        };
-        os_write_ptr64(base, iat_rva as usize, addr as u64)?;
-
-            int_rva = int_rva.wrapping_add(8);
-            iat_rva = iat_rva.wrapping_add(8);
+            let thunk = read_thunk_value(img, int_rva)?;
+            if thunk == 0 { break; }
+            let addr_usize: usize = if (thunk & ordinal_flag) != 0 {
+                let ordinal = (thunk & 0xFFFF) as u16;
+                os_get_proc_by_ordinal(hmod, ordinal)?
+            } else {
+                let ibn_rva = (thunk & 0xFFFF_FFFF) as u32;
+                let ibn = read_import_by_name(img, ibn_rva)?;
+                os_get_proc_by_name(hmod, ibn.name)?
+            };
+        
+            if is_x64(img) {
+                os_write_ptr64(base, iat_rva as usize, addr_usize as u64)?;
+            } else {
+                os_write_ptr32(base, iat_rva as usize, addr_usize as u32)?;
+            }
+        
+            int_rva = int_rva.wrapping_add(stride as u32);
+            iat_rva = iat_rva.wrapping_add(stride as u32);
         }
     }
 
@@ -82,6 +87,14 @@ fn os_write_ptr64(base: usize, iat_rva: usize, value: u64) -> Result<(), LoaderE
     Ok(())
 }
 
+fn os_write_ptr32(base: usize, iat_rva: usize, value: u32) -> Result<(), LoaderError> {
+    unsafe {
+        let p = (base as *mut u8).add(iat_rva) as *mut u32;
+        core::ptr::write_unaligned(p, value);
+    }
+    Ok(())
+}
+
 fn read_cstr_from_rva<'a>(img: &'a PeImage, rva: u32) -> Result<&'a [u8], LoaderError> {
     let off = img.rva_to_offset(rva as usize)
         .ok_or(LoaderError::Format("cstr rva out of file"))?;
@@ -92,16 +105,6 @@ fn read_cstr_from_rva<'a>(img: &'a PeImage, rva: u32) -> Result<&'a [u8], Loader
         return Err(LoaderError::Format("unterminated cstr"));
     }
     Ok(&bytes[off..end])
-}
-
-fn read_u64_from_file(img: &PeImage, rva: u32) -> Result<u64, LoaderError> {
-    let off = img.rva_to_offset(rva as usize)
-        .ok_or(LoaderError::Format("u64 rva out of file"))?;
-    let bytes = img.as_bytes();
-    if off + 8 > bytes.len() { return Err(LoaderError::Format("u64 out of file")); }
-    let mut buf = [0u8; 8];
-    buf.copy_from_slice(&bytes[off..off+8]);
-    Ok(u64::from_le_bytes(buf))
 }
 
 fn read_import_by_name<'a>(img: &'a PeImage, rva: u32) -> Result<ImportByName<'a>, LoaderError> {
@@ -115,4 +118,26 @@ fn read_import_by_name<'a>(img: &'a PeImage, rva: u32) -> Result<ImportByName<'a
     if p == bytes.len() { return Err(LoaderError::Format("name unterminated")); }
     let name = core::str::from_utf8(&bytes[off+2..p]).map_err(|_| LoaderError::Format("name not utf8"))?;
     Ok(ImportByName { hint, name })
+}
+
+fn is_x64(img: &PeImage) -> bool { img.arch() == Arch::X64 }
+
+fn thunk_stride(img: &PeImage) -> u8 { if is_x64(img) { 8 } else { 4 }}
+
+fn ordinal_flag(img: &PeImage) -> u64 {if is_x64(img) { 0x8000_0000_0000_0000 } else { 0x8000_0000 }}
+
+fn read_thunk_value(img: &PeImage, rva: u32) -> Result<u64, LoaderError> {
+    let offset = img.rva_to_offset(rva as usize).ok_or(LoaderError::Format("thunk rva is out of file"))?;
+    let b = img.as_bytes();
+    if is_x64(img) {
+        if offset + 8 > b.len() { return Err(LoaderError::Format("thunk out of bound")); }
+        let mut tmp = [0u8; 8]; 
+        tmp.copy_from_slice(&b[offset..offset+8]);
+        Ok(u64::from_le_bytes(tmp))
+    } else {
+        if offset + 4 > b.len() { return Err(LoaderError::Format("thunk out of bound")); }
+        let mut tmp = [0u8; 4]; 
+        tmp.copy_from_slice(&b[offset..offset+4]);
+        Ok(u32::from_le_bytes(tmp) as u64)
+    }
 }
